@@ -1,0 +1,124 @@
+services:
+  # MariaDB Service
+  mariadb-contact-form:
+    image: mariadb:latest
+    container_name: mariadb-contact-form
+    restart: on-failure
+    env_file:
+      - .env
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+    # ports:
+    #   - "${HOST_MARIADB_PORT}:${CONT_MARIADB_PORT}"
+    volumes:
+      - mariadb-contact-form-data:/var/lib/mysql
+    networks:
+      - contact-form-network-database
+
+  # PHPMyAdmin Service
+  phpmyadmin-contact-form:
+    image: phpmyadmin/phpmyadmin:latest
+    container_name: phpmyadmin-contact-form
+    restart: on-failure
+    environment:
+      - PMA_HOST=mariadb-contact-form
+      - PMA_PORT=${CONT_MARIADB_PORT}
+    env_file:
+      - .env
+    ports:
+      - "${HOST_PHPMYADMIN_PORT}:${CONT_PHPMYADMIN_PORT}"
+    depends_on:
+      - mariadb-contact-form
+    networks:
+      - contact-form-network-database
+
+  # Contact Form API Service
+  api-contact-form:
+    build:
+      context: ./app/api-contact-form
+      dockerfile: Dockerfile
+    image: api-contact-form:1.0.0
+    container_name: api-contact-form
+    restart: on-failure
+    depends_on:
+      - mariadb-contact-form
+    env_file:
+      - .env
+    ports:
+      - "${HOST_API_PORT}:${CONT_API_PORT}"
+    environment:
+      - APP_PORT=${CONT_API_PORT}
+      - APP_TIMEZONE=Asia/Jakarta
+      - DB_HOST=mariadb-contact-form
+      - DB_PORT=${CONT_MARIADB_PORT}
+      - DB_USER=${MYSQL_USER}
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+      - DB_NAME=${MYSQL_DATABASE}
+      - CORS_ALLOWED_ORIGINS=http://localhost:8081,http://localhost:8082,http://cms-contact-form:8081,http://client-contact-form:8082
+      - CORS_ALLOWED_METHODS=GET,POST,PUT,DELETE,OPTIONS
+      - CORS_ALLOWED_HEADERS=Origin,Content-Type,Accept,Authorization
+      - CORS_ALLOW_CREDENTIALS=true
+      - CORS_EXPOSE_HEADERS=Content-Length,Content-Type
+    networks:
+      - contact-form-network-database
+      - contact-form-network-api
+
+  # Contact Form Web, Embed UI for submiting contact form from client side
+  client-contact-form:
+    build:
+      context: ./app/client-contact-form
+      dockerfile: Dockerfile
+    image: client-contact-form:1.0.0
+    container_name: client-contact-form
+    restart: on-failure
+    ports:
+      - "${HOST_CLIENT_PORT}:${CONT_CLIENT_PORT}"
+    environment:
+      - API_URL=http://api-contact-form:${CONT_API_PORT}
+    networks:
+      - contact-form-network-api
+
+  # Contact Form CMS Service
+  cms-contact-form:
+    build:
+      context: ./app/cms-contact-form
+      dockerfile: Dockerfile
+    image: cms-contact-form:1.0.0
+    container_name: cms-contact-form
+    restart: unless-stopped
+    environment:
+      - API_CONTACT_FORM_BASE_URI=http://api-contact-form:${CONT_API_PORT}/contacts
+      - SESSION_DRIVER=file
+    volumes:
+      - ./app/cms-contact-form/docker/php/local.ini:/usr/local/etc/php/conf.d/local.ini
+    depends_on:
+      - nginx-cms-contact-form
+    networks:
+      - contact-form-network-api
+      - contact-form-network-cms
+
+  # Nginx Web Server for Contact Form CMS
+  nginx-cms-contact-form:
+    image: nginx:alpine
+    container_name: nginx-cms-contact-form
+    restart: unless-stopped
+    ports:
+      - "${HOST_CMS_PORT}:${CONT_CMS_PORT}"
+    volumes:
+      - ./app/cms-contact-form/docker/nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+    networks:
+      - contact-form-network-cms
+
+volumes:
+  mariadb-contact-form-data:
+
+networks:
+  contact-form-network-database:
+    driver: bridge
+  contact-form-network-api:
+    driver: bridge
+  contact-form-network-cms:
+    driver: bridge
